@@ -466,7 +466,7 @@ class Qwen2LM(TransformerLM):
             prompt_speech_token_len: torch.Tensor,
             embedding: torch.Tensor,
             sampling: int = 25,
-            max_token_text_ratio: float = 20,
+            max_token_text_ratio: float = 8,
             min_token_text_ratio: float = 2,
             uuid: str = '',
     ) -> Generator[torch.Tensor, None, None]:
@@ -558,7 +558,7 @@ class Qwen2LM(TransformerLM):
             prompt_speech_token_len: torch.Tensor,
             embedding: torch.Tensor,
             sampling: int = 25,
-            max_token_text_ratio: float = 20,
+            max_token_text_ratio: float = 8,
             min_token_text_ratio: float = 2,
     ) -> Generator[torch.Tensor, None, None]:
 
