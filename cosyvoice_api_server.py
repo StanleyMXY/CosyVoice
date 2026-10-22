@@ -66,6 +66,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+PROMPT_END = "<|endofprompt|>"
+PROMPT_PREFIX = "You are a helpful assistant." + PROMPT_END
+
 model = None
 voices: dict[str, dict] = {}
 sample_rate = 24000
@@ -80,19 +83,24 @@ def _register_voice_file(wav_path: Path) -> bool:
         logger.warning(f"Skipping {wav_path.name}: no matching .txt file")
         return False
 
-    prompt_text = txt_path.read_text(encoding="utf-8").strip()
-    if not prompt_text:
+    transcript = txt_path.read_text(encoding="utf-8").replace(PROMPT_END, "").strip()
+    if not transcript:
         logger.warning(f"Skipping {wav_path.name}: .txt file is empty")
         return False
-    if "<|endofprompt|>" not in prompt_text:
-        prompt_text = prompt_text + "<|endofprompt|>"
 
-    prompt_wav = load_wav(str(wav_path), 16000)
+    # Both follow CosyVoice3's own usage (example.py): the prompt text is the instruction prefix,
+    # the end-of-prompt tag, then the transcript of the reference audio; the reference audio is
+    # passed as a file path. The frontend loads it itself at the rate each of its steps needs (16 kHz
+    # for the speech tokens and the speaker embedding, 24 kHz for the mel features). Passing an
+    # already loaded 16 kHz tensor makes load_wav() hand those 16 kHz samples to the 24 kHz step
+    # unchanged, which corrupts the prompt features and makes the model speak the reference
+    # recording instead of the requested text.
     voices[name] = {
-        "prompt_text": prompt_text,
-        "prompt_wav": prompt_wav,
+        "transcript": transcript,
+        "prompt_text": PROMPT_PREFIX + transcript,
+        "prompt_wav": str(wav_path),
     }
-    logger.info(f"Loaded voice '{name}' from {wav_path.name} ({prompt_text[:30]}...)")
+    logger.info(f"Loaded voice '{name}' from {wav_path.name} ({transcript[:30]}...)")
     return True
 
 
@@ -167,7 +175,7 @@ async def speech(request: Request):
         tts_text=text,
         prompt_text=voice["prompt_text"],
         prompt_wav=voice["prompt_wav"],
-        stream=True,
+        stream=stream,
         speed=speed,
     )
 
@@ -182,7 +190,7 @@ async def list_voices():
     """List available voices."""
     return {
         "voices": [
-            {"name": k, "prompt_text": v["prompt_text"][:50]}
+            {"name": k, "prompt_text": v["transcript"][:50]}
             for k, v in voices.items()
         ]
     }
@@ -214,7 +222,7 @@ async def register_voice(
 
     return {
         "voices": [
-            {"name": k, "prompt_text": v["prompt_text"][:50]}
+            {"name": k, "prompt_text": v["transcript"][:50]}
             for k, v in voices.items()
         ]
     }
