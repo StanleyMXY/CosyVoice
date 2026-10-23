@@ -100,6 +100,18 @@ def _register_voice_file(wav_path: Path) -> bool:
         "prompt_text": PROMPT_PREFIX + transcript,
         "prompt_wav": str(wav_path),
     }
+    # Enrol the voice once: the model extracts the reference's speech tokens, mel features and speaker
+    # embedding now and keeps them under this name (CosyVoice.add_zero_shot_spk, used by its own
+    # example), so a synthesis request does not run that extraction on the audio again. The same call
+    # also rejects a reference the model cannot use (longer than 30 s) at registration, not at the
+    # first sentence.
+    try:
+        prompt_text = model.frontend.text_normalize(voices[name]["prompt_text"], split=False, text_frontend=True)
+        model.add_zero_shot_spk(prompt_text, str(wav_path), name)
+    except Exception as e:
+        voices.pop(name, None)
+        logger.error(f"Cannot enrol voice '{name}' from {wav_path.name}: {e}")
+        return False
     logger.info(f"Loaded voice '{name}' from {wav_path.name} ({transcript[:30]}...)")
     return True
 
@@ -168,13 +180,15 @@ async def speech(request: Request):
             "error": f"Voice '{voice_name}' not found. Available: {available}"
         }
 
-    voice = voices[voice_name]
     logger.info(f"TTS request: voice={voice_name}, text={text[:60]}...")
 
+    # The voice was enrolled under its name when it was registered: the reference audio and its text
+    # are not passed again.
     model_output = model.inference_zero_shot(
         tts_text=text,
-        prompt_text=voice["prompt_text"],
-        prompt_wav=voice["prompt_wav"],
+        prompt_text="",
+        prompt_wav="",
+        zero_shot_spk_id=voice_name,
         stream=stream,
         speed=speed,
     )
@@ -218,7 +232,9 @@ async def register_voice(
 
     ok = _register_voice_file(wav_path)
     if not ok:
-        return {"error": f"failed to register voice '{name}'"}
+        wav_path.unlink(missing_ok=True)
+        txt_path.unlink(missing_ok=True)
+        return {"error": f"failed to register voice '{name}' (the reference audio must be at most 30 seconds)"}
 
     return {
         "voices": [
